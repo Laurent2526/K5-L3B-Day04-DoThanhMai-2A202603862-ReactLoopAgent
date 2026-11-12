@@ -3,6 +3,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import time
 
 CONFIG = {
     'openai': ('OPENAI_API_KEY', 'https://api.openai.com/v1/chat/completions'),
@@ -13,15 +14,30 @@ CONFIG = {
 
 
 def post_json(url, headers, payload):
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', **headers})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as exc:
-        # Do not print response bodies: they may contain account or request data.
-        raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json', **headers},
+    )
+
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                return json.load(response)
+
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(
+                f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.'
+            ) from exc
+
+        except (TimeoutError, urllib.error.URLError) as exc:
+            is_timeout = (
+                isinstance(exc, TimeoutError)
+                or isinstance(getattr(exc, 'reason', None), TimeoutError)
+            )
+            if not is_timeout or attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
 
 
 class Provider:
